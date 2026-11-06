@@ -209,38 +209,36 @@ object WallpaperRenderer {
         canvas.drawColor(Color.rgb(9, 13, 23))
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val accent = Color.rgb(145, 165, 255)
-        paint.color = 0xFFB7C1D8.toInt()
-        paint.textSize = width * .034f
-        canvas.drawText(LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE  •  dd MMMM yyyy")).uppercase(), width * .08f, height * .23f, paint)
+        // Keep the top 38% clear: Android draws its own clock and date over this wallpaper.
         paint.color = Color.WHITE
         paint.typeface = Typeface.create("sans-serif", Typeface.BOLD)
         paint.textSize = width * .095f
-        canvas.drawText(streak.toString() + " DAY STREAK", width * .08f, height * .31f, paint)
+        canvas.drawText(streak.toString() + " DAY STREAK", width * .08f, height * .44f, paint)
         paint.typeface = Typeface.DEFAULT
         paint.textSize = width * .04f
         paint.color = accent
-        canvas.drawText(style.uppercase(), width * .08f, height * .37f, paint)
+        canvas.drawText(style.uppercase(), width * .08f, height * .50f, paint)
         drawStyle(canvas, paint, width, height, style, streak, accent)
         paint.style = Paint.Style.FILL
         paint.color = Color.WHITE
         paint.textSize = width * .043f
         paint.typeface = Typeface.DEFAULT_BOLD
-        canvas.drawText("TODAY'S FOCUS", width * .08f, height * .73f, paint)
+        canvas.drawText("TODAY'S FOCUS", width * .08f, height * .80f, paint)
         paint.typeface = Typeface.DEFAULT
         paint.textSize = width * .036f
         paint.color = 0xFFE0E5F0.toInt()
         goals.filter { LocalDate.now().toString() !in it.dates }.take(3).forEachIndexed { index, goal ->
-            canvas.drawText("•  " + goal.title.take(32), width * .08f, height * (.77f + index * .035f), paint)
+            canvas.drawText("•  " + goal.title.take(32), width * .08f, height * (.84f + index * .032f), paint)
         }
         paint.color = 0xFF9DA8BC.toInt()
         paint.textSize = width * .027f
-        canvas.drawText("SMALL STEPS. COMPOUND PROGRESS.", width * .08f, height * .92f, paint)
+        canvas.drawText("SMALL STEPS. COMPOUND PROGRESS.", width * .08f, height * .96f, paint)
         return bitmap
     }
 
     private fun drawStyle(c: Canvas, p: Paint, w: Int, h: Int, style: String, streak: Int, accent: Int) {
         val cx = w / 2f
-        val cy = h * .53f
+        val cy = h * .63f
         p.style = Paint.Style.STROKE
         p.strokeWidth = w * .012f
         when (style) {
@@ -251,7 +249,7 @@ object WallpaperRenderer {
                     p.style = Paint.Style.FILL
                     p.color = if (i >= 35 - min(streak, 35)) accent else 0xFF39465F.toInt()
                     val x = w * .16f + (i % 7) * (cell + gap)
-                    val y = h * .44f + (i / 7) * (cell + gap)
+                    val y = h * .54f + (i / 7) * (cell + gap)
                     c.drawRoundRect(x, y, x + cell, y + cell, cell * .18f, cell * .18f, p)
                 }
             }
@@ -299,7 +297,7 @@ object WallpaperRenderer {
                 val random = java.util.Random(42)
                 repeat(65) { index ->
                     val x = random.nextFloat() * w
-                    val y = h * .43f + random.nextFloat() * h * .22f
+                    val y = h * .55f + random.nextFloat() * h * .18f
                     p.color = if (index < streak) accent else 0xFF53617D.toInt()
                     c.drawCircle(x, y, if (index < streak) w * .006f else w * .003f, p)
                 }
