@@ -41,3 +41,6 @@ A GitHub Actions workflow is included to build a debug APK. After a successful w
 - `app/src/main/java/com/goalwall/MainActivity.kt` — app UI, goal/streak logic, worker, and wallpaper renderer.
 - `app/src/main/AndroidManifest.xml` — launcher activity and wallpaper permission.
 - `app/build.gradle.kts` — Android app and WorkManager dependencies.
+
+
+Build workflow: `.github/workflows/android.yml` runs on pushes to `main` and pull requests.
