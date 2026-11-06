@@ -1,6 +1,7 @@
 package com.goalwall
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.*
@@ -17,9 +18,23 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
-import kotlin.math.sin
 
 data class Goal(val id: Long, val title: String, val dates: MutableSet<String>)
+
+data class Palette(val name: String, val background: Int, val card: Int, val accent: Int, val muted: Int) {
+    companion object {
+        val all = listOf(
+            Palette("Midnight", Color.rgb(10, 15, 27), Color.rgb(22, 31, 49), Color.rgb(150, 171, 255), Color.rgb(151, 165, 190)),
+            Palette("Sage", Color.rgb(12, 24, 22), Color.rgb(25, 43, 38), Color.rgb(135, 211, 169), Color.rgb(153, 181, 168)),
+            Palette("Sunset", Color.rgb(28, 16, 20), Color.rgb(48, 29, 34), Color.rgb(255, 164, 126), Color.rgb(195, 157, 151)),
+            Palette("Violet", Color.rgb(20, 14, 31), Color.rgb(36, 26, 53), Color.rgb(202, 157, 255), Color.rgb(174, 157, 194))
+        )
+        fun selected(context: Context): Palette {
+            val name = context.getSharedPreferences("goalwall", Context.MODE_PRIVATE).getString("palette", "Midnight")
+            return all.firstOrNull { it.name == name } ?: all[0]
+        }
+    }
+}
 
 object GoalStore {
     private const val PREFS = "goalwall"
@@ -45,6 +60,7 @@ object GoalStore {
         }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("goals", array.toString()).apply()
     }
+    fun completedDates(goals: List<Goal>) = goals.flatMap { it.dates }.toSet()
     fun streak(dates: Set<String>): Int {
         var day = LocalDate.now()
         if (day.toString() !in dates) day = day.minusDays(1)
@@ -52,105 +68,253 @@ object GoalStore {
         while (day.toString() in dates) { count++; day = day.minusDays(1) }
         return count
     }
-    fun overallStreak(goals: List<Goal>) = streak(goals.flatMap { it.dates }.toSet())
+    fun overallStreak(goals: List<Goal>) = streak(completedDates(goals))
 }
 
 class MainActivity : Activity() {
+    private lateinit var root: LinearLayout
     private lateinit var goalList: LinearLayout
-    private lateinit var summary: TextView
+    private lateinit var heatmap: LinearLayout
+    private lateinit var stats: TextView
+    private lateinit var progress: TextView
+    private lateinit var selectedDay: TextView
+    private lateinit var paletteRow: LinearLayout
+    private var chosenDate: LocalDate = LocalDate.now()
     private val styles = listOf("Heatmap", "Rings", "Chain", "Tree", "Constellation", "Mountain")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         scheduleRefresh()
-        renderScreen()
+        buildUi()
     }
 
-    private fun renderScreen() {
-        val page = LinearLayout(this).apply {
+    private fun buildUi() {
+        val palette = Palette.selected(this)
+        root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 32, 24, 32)
-            setBackgroundColor(Color.rgb(12, 15, 24))
+            setPadding(22, 24, 22, 30)
+            setBackgroundColor(palette.background)
         }
-        val scroll = ScrollView(this).apply { addView(page) }
+        val scroll = ScrollView(this).apply { addView(root) }
         setContentView(scroll)
-        page.addView(text("GOALWALL", 28f, Color.WHITE, true))
-        page.addView(text("Turn consistency into something you can see.", 14f, 0xFFB8C1D4.toInt()))
-        summary = text("", 16f, 0xFFE8ECF5.toInt(), true)
-        page.addView(summary)
-        page.addView(gap(18))
-        page.addView(text("YOUR DAILY GOALS", 13f, 0xFF9DAAC1.toInt(), true))
-        goalList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        page.addView(goalList)
 
-        val input = EditText(this).apply {
-            hint = "Add a goal, e.g. Study Operating Systems"
-            setHintTextColor(0xFF7F899D.toInt())
-            setTextColor(Color.WHITE)
-            setSingleLine(true)
-        }
-        page.addView(input)
-        page.addView(Button(this).apply {
-            text = "ADD GOAL"
-            setOnClickListener {
-                val title = input.text.toString().trim()
-                if (title.isNotEmpty()) {
-                    val goals = GoalStore.read(this@MainActivity)
-                    goals.add(Goal(System.currentTimeMillis(), title, mutableSetOf()))
-                    GoalStore.save(this@MainActivity, goals)
-                    input.text.clear()
-                    refreshGoals()
-                }
-            }
+        root.addView(label("GOALWALL", 27f, Color.WHITE, true))
+        root.addView(label("Make consistency visible.", 14f, palette.muted))
+        root.addView(space(16))
+
+        val hero = card(palette)
+        hero.addView(label("YOUR MOMENTUM", 11f, palette.muted, true))
+        stats = label("", 27f, Color.WHITE, true)
+        hero.addView(stats)
+        progress = label("", 14f, palette.accent, true)
+        hero.addView(progress)
+        root.addView(hero)
+        root.addView(space(16))
+
+        val heatCard = card(palette)
+        heatCard.addView(label("YOUR ACTIVITY", 16f, Color.WHITE, true))
+        heatCard.addView(label("Tap any day to inspect your progress.", 12f, palette.muted))
+        heatmap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        heatCard.addView(heatmap)
+        selectedDay = label("", 12f, palette.accent)
+        heatCard.addView(selectedDay)
+        root.addView(heatCard)
+        root.addView(space(16))
+
+        root.addView(label("TODAY'S GOALS", 16f, Color.WHITE, true))
+        root.addView(label("Check off what you complete. Long-press a goal to remove it.", 12f, palette.muted))
+        goalList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(goalList)
+        root.addView(Button(this).apply {
+            text = "+  ADD A GOAL"
+            setOnClickListener { addGoalDialog() }
         })
-        page.addView(gap(18))
-        page.addView(text("WALLPAPER DESIGN", 13f, 0xFF9DAAC1.toInt(), true))
-        val picker = Spinner(this)
-        picker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, styles)
+        root.addView(space(16))
+
+        val designCard = card(palette)
+        designCard.addView(label("MAKE IT YOURS", 16f, Color.WHITE, true))
+        designCard.addView(label("Choose a colour mood for your wallpaper.", 12f, palette.muted))
+        paletteRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        designCard.addView(paletteRow)
+        val stylePicker = Spinner(this)
+        stylePicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, styles)
         val prefs = getSharedPreferences("goalwall", MODE_PRIVATE)
-        picker.setSelection(styles.indexOf(prefs.getString("style", "Heatmap")).coerceAtLeast(0))
-        picker.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+        stylePicker.setSelection(styles.indexOf(prefs.getString("style", "Heatmap")).coerceAtLeast(0))
+        stylePicker.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
                 prefs.edit().putString("style", styles[position]).apply()
             }
         }
-        page.addView(picker)
-        page.addView(Button(this).apply {
-            text = "APPLY TO LOCK SCREEN"
+        designCard.addView(label("Wallpaper pattern", 12f, palette.muted))
+        designCard.addView(stylePicker)
+        designCard.addView(Button(this).apply {
+            text = "PREVIEW & APPLY LOCK SCREEN"
             setOnClickListener { applyWallpaper() }
         })
-        page.addView(gap(12))
-        page.addView(text("Your goals stay on this device. Daily automatic updates are scheduled by Android and may be delayed by battery optimisation.", 12f, 0xFF8F9BB0.toInt()))
-        refreshGoals()
+        root.addView(designCard)
+        root.addView(space(12))
+        root.addView(label("Private by design • Your goals stay on this phone.", 11f, palette.muted))
+        renderPaletteChoices()
+        refresh()
     }
 
-    private fun refreshGoals() {
+    private fun card(p: Palette) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(17, 15, 17, 15)
+        setBackgroundColor(p.card)
+    }
+
+    private fun renderPaletteChoices() {
+        paletteRow.removeAllViews()
+        val current = Palette.selected(this)
+        Palette.all.forEach { p ->
+            val button = Button(this).apply {
+                text = if (p.name == current.name) "✓ " + p.name else p.name
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(p.accent)
+                setOnClickListener {
+                    getSharedPreferences("goalwall", MODE_PRIVATE).edit().putString("palette", p.name).apply()
+                    rebuild()
+                }
+            }
+            paletteRow.addView(button, LinearLayout.LayoutParams(0, dp(46), 1f).apply { setMargins(2, 8, 2, 8) })
+        }
+    }
+
+    private fun rebuild() {
+        buildUi()
+    }
+
+    private fun addGoalDialog() {
+        val input = EditText(this).apply { hint = "e.g. Study, exercise, read 10 pages" }
+        AlertDialog.Builder(this)
+            .setTitle("Add a goal")
+            .setMessage("Keep it simple and specific.")
+            .setView(input)
+            .setPositiveButton("Add") { _, _ ->
+                val title = input.text.toString().trim()
+                if (title.isNotEmpty()) {
+                    val goals = GoalStore.read(this)
+                    goals.add(Goal(System.currentTimeMillis(), title, mutableSetOf()))
+                    GoalStore.save(this, goals)
+                    refresh()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun refresh() {
         val goals = GoalStore.read(this)
         val today = LocalDate.now().toString()
-        summary.text = "🔥  " + GoalStore.overallStreak(goals) + "-day streak   •   " +
-            LocalDate.now().format(DateTimeFormatter.ofPattern("dd MMM yyyy"))
+        val completed = goals.count { today in it.dates }
+        stats.text = GoalStore.overallStreak(goals).toString() + " day streak  🔥"
+        progress.text = if (goals.isEmpty()) "Add your first goal to begin." else "$completed of ${goals.size} goals completed today"
+        renderHeatmap(goals)
+        renderGoals(goals)
+    }
+
+    private fun renderHeatmap(goals: List<Goal>) {
+        heatmap.removeAllViews()
+        val p = Palette.selected(this)
+        val end = LocalDate.now()
+        val start = end.minusDays(34)
+        val dates = (0..34).map { start.plusDays(it.toLong()) }
+        val weeks = dates.chunked(7)
+        weeks.forEach { week ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            week.forEach { date ->
+                val count = goals.count { date.toString() in it.dates }
+                val tile = TextView(this).apply {
+                    text = date.dayOfMonth.toString()
+                    textSize = 11f
+                    gravity = Gravity.CENTER
+                    setTextColor(if (count > 0) Color.WHITE else p.muted)
+                    setBackgroundColor(heatColor(p, count))
+                    contentDescription = "${date.format(DateTimeFormatter.ofPattern("d MMM"))}: $count completed goals"
+                    setOnClickListener {
+                        chosenDate = date
+                        val detail = goals.count { date.toString() in it.dates }
+                        selectedDay.text = date.format(DateTimeFormatter.ofPattern("EEE, d MMM")) + "  •  $detail goals completed"
+                    }
+                }
+                val lp = LinearLayout.LayoutParams(0, dp(39), 1f)
+                lp.setMargins(2, 3, 2, 3)
+                row.addView(tile, lp)
+            }
+            repeat(7 - week.size) {
+                row.addView(View(this), LinearLayout.LayoutParams(0, dp(39), 1f))
+            }
+            heatmap.addView(row)
+        }
+        selectedDay.text = chosenDate.format(DateTimeFormatter.ofPattern("EEE, d MMM")) +
+            "  •  " + goals.count { chosenDate.toString() in it.dates } + " goals completed"
+    }
+
+    private fun heatColor(p: Palette, count: Int): Int = when (count) {
+        0 -> Color.rgb(47, 56, 73)
+        1 -> blend(p.card, p.accent, .40f)
+        2 -> blend(p.card, p.accent, .68f)
+        else -> p.accent
+    }
+
+    private fun blend(a: Int, b: Int, amount: Float): Int {
+        fun channel(x: Int, y: Int) = (Color.red(x) + (Color.red(y) - Color.red(x)) * amount).toInt()
+        fun green(x: Int, y: Int) = (Color.green(x) + (Color.green(y) - Color.green(x)) * amount).toInt()
+        fun blue(x: Int, y: Int) = (Color.blue(x) + (Color.blue(y) - Color.blue(x)) * amount).toInt()
+        return Color.rgb(channel(a,b), green(a,b), blue(a,b))
+    }
+
+    private fun renderGoals(goals: List<Goal>) {
         goalList.removeAllViews()
-        if (goals.isEmpty()) goalList.addView(text("No goals yet. Add your first one above.", 14f, 0xFFB8C1D4.toInt()))
+        val today = LocalDate.now().toString()
+        if (goals.isEmpty()) {
+            goalList.addView(label("Nothing here yet. Add one small goal to get started.", 13f, Palette.selected(this).muted))
+            return
+        }
         goals.forEach { goal ->
-            val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            val p = Palette.selected(this)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(10, 8, 10, 8)
+                setBackgroundColor(p.card)
+            }
             val check = CheckBox(this).apply {
                 text = goal.title
+                textSize = 14f
                 setTextColor(Color.WHITE)
                 isChecked = today in goal.dates
-                buttonTintList = android.content.res.ColorStateList.valueOf(0xFF9DAEFF.toInt())
+                buttonTintList = android.content.res.ColorStateList.valueOf(p.accent)
                 layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             }
+            val streak = label("🔥 ${GoalStore.streak(goal.dates)}", 12f, p.accent, true)
             row.addView(check)
-            row.addView(text("🔥 " + GoalStore.streak(goal.dates), 14f, 0xFFFFC36A.toInt(), true))
-            goalList.addView(row)
+            row.addView(streak)
+            row.setOnLongClickListener {
+                AlertDialog.Builder(this)
+                    .setTitle("Remove goal?")
+                    .setMessage("Remove '${goal.title}' and its saved history?")
+                    .setNegativeButton("Keep", null)
+                    .setPositiveButton("Remove") { _, _ ->
+                        val updated = GoalStore.read(this).filterNot { it.id == goal.id }
+                        GoalStore.save(this, updated)
+                        refresh()
+                    }.show()
+                true
+            }
             check.setOnCheckedChangeListener { _, checked ->
                 val updated = GoalStore.read(this)
                 val target = updated.firstOrNull { it.id == goal.id } ?: return@setOnCheckedChangeListener
                 if (checked) target.dates.add(today) else target.dates.remove(today)
                 GoalStore.save(this, updated)
-                refreshGoals()
+                refresh()
             }
+            val lp = LinearLayout.LayoutParams(-1, -2)
+            lp.setMargins(0, dp(5), 0, dp(5))
+            goalList.addView(row, lp)
         }
     }
 
@@ -158,7 +322,7 @@ class MainActivity : Activity() {
         try {
             val style = getSharedPreferences("goalwall", MODE_PRIVATE).getString("style", "Heatmap") ?: "Heatmap"
             val goals = GoalStore.read(this)
-            val bitmap = WallpaperRenderer.create(this, goals, GoalStore.overallStreak(goals), style)
+            val bitmap = WallpaperRenderer.create(this, goals, GoalStore.overallStreak(goals), style, Palette.selected(this))
             WallpaperManager.getInstance(this).setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK)
             Toast.makeText(this, "Lock-screen wallpaper updated", Toast.LENGTH_SHORT).show()
         } catch (error: Exception) {
@@ -172,53 +336,48 @@ class MainActivity : Activity() {
         val delay = Duration.between(now, next).toMillis().coerceAtLeast(1000)
         val work = PeriodicWorkRequestBuilder<DailyWallpaperWorker>(24, TimeUnit.HOURS)
             .setInitialDelay(delay, TimeUnit.MILLISECONDS).build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "goalwall_daily", ExistingPeriodicWorkPolicy.UPDATE, work
-        )
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork("goalwall_daily", ExistingPeriodicWorkPolicy.UPDATE, work)
     }
 
-    private fun text(value: String, size: Float, color: Int, bold: Boolean = false) =
+    private fun label(value: String, size: Float, color: Int, bold: Boolean = false) =
         TextView(this).apply {
             text = value; textSize = size; setTextColor(color)
             if (bold) setTypeface(null, Typeface.BOLD)
-            setPadding(0, 6, 0, 6)
+            setPadding(0, 5, 0, 5)
         }
-    private fun gap(height: Int) = View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(1, height)
-    }
+    private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }
 
 class DailyWallpaperWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result = try {
         val goals = GoalStore.read(applicationContext)
-        val style = applicationContext.getSharedPreferences("goalwall", Context.MODE_PRIVATE)
-            .getString("style", "Heatmap") ?: "Heatmap"
-        val bitmap = WallpaperRenderer.create(applicationContext, goals, GoalStore.overallStreak(goals), style)
+        val prefs = applicationContext.getSharedPreferences("goalwall", Context.MODE_PRIVATE)
+        val style = prefs.getString("style", "Heatmap") ?: "Heatmap"
+        val bitmap = WallpaperRenderer.create(applicationContext, goals, GoalStore.overallStreak(goals), style, Palette.selected(applicationContext))
         WallpaperManager.getInstance(applicationContext).setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK)
         Result.success()
     } catch (_: Exception) { Result.retry() }
 }
 
 object WallpaperRenderer {
-    fun create(context: Context, goals: List<Goal>, streak: Int, style: String): Bitmap {
+    fun create(context: Context, goals: List<Goal>, streak: Int, style: String, palette: Palette): Bitmap {
         val metrics = context.resources.displayMetrics
         val width = metrics.widthPixels.coerceAtLeast(1080)
         val height = (metrics.heightPixels * 1.15f).toInt().coerceAtLeast(1920)
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.rgb(9, 13, 23))
+        canvas.drawColor(palette.background)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        val accent = Color.rgb(145, 165, 255)
-        // Keep the top 38% clear: Android draws its own clock and date over this wallpaper.
         paint.color = Color.WHITE
         paint.typeface = Typeface.create("sans-serif", Typeface.BOLD)
         paint.textSize = width * .095f
         canvas.drawText(streak.toString() + " DAY STREAK", width * .08f, height * .44f, paint)
         paint.typeface = Typeface.DEFAULT
         paint.textSize = width * .04f
-        paint.color = accent
+        paint.color = palette.accent
         canvas.drawText(style.uppercase(), width * .08f, height * .50f, paint)
-        drawStyle(canvas, paint, width, height, style, streak, accent)
+        drawHeatmap(canvas, paint, width, height, goals, palette)
         paint.style = Paint.Style.FILL
         paint.color = Color.WHITE
         paint.textSize = width * .043f
@@ -230,79 +389,38 @@ object WallpaperRenderer {
         goals.filter { LocalDate.now().toString() !in it.dates }.take(3).forEachIndexed { index, goal ->
             canvas.drawText("•  " + goal.title.take(32), width * .08f, height * (.84f + index * .032f), paint)
         }
-        paint.color = 0xFF9DA8BC.toInt()
+        paint.color = palette.muted
         paint.textSize = width * .027f
         canvas.drawText("SMALL STEPS. COMPOUND PROGRESS.", width * .08f, height * .96f, paint)
         return bitmap
     }
 
-    private fun drawStyle(c: Canvas, p: Paint, w: Int, h: Int, style: String, streak: Int, accent: Int) {
-        val cx = w / 2f
-        val cy = h * .63f
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = w * .012f
-        when (style) {
-            "Heatmap" -> {
-                val cell = w * .065f
-                val gap = w * .018f
-                for (i in 0 until 35) {
-                    p.style = Paint.Style.FILL
-                    p.color = if (i >= 35 - min(streak, 35)) accent else 0xFF39465F.toInt()
-                    val x = w * .16f + (i % 7) * (cell + gap)
-                    val y = h * .54f + (i / 7) * (cell + gap)
-                    c.drawRoundRect(x, y, x + cell, y + cell, cell * .18f, cell * .18f, p)
-                }
+    private fun drawHeatmap(c: Canvas, p: Paint, w: Int, h: Int, goals: List<Goal>, palette: Palette) {
+        val start = LocalDate.now().minusDays(34)
+        val cell = w * .072f
+        val gap = w * .018f
+        val gridWidth = 7 * cell + 6 * gap
+        val startX = (w - gridWidth) / 2f
+        val startY = h * .56f
+        val dates = GoalStore.completedDates(goals)
+        for (i in 0 until 35) {
+            val date = start.plusDays(i.toLong())
+            val count = goals.count { date.toString() in it.dates }
+            p.style = Paint.Style.FILL
+            p.color = when (count) {
+                0 -> 0xFF35415C.toInt()
+                1 -> palette.accent
+                else -> blendColor(palette.accent, Color.WHITE, min(count, 3) * .13f)
             }
-            "Rings" -> for (i in 0..2) {
-                p.color = if (i == 0) accent else 0xFF46516B.toInt()
-                p.strokeWidth = w * .018f
-                val radius = w * (.11f + i * .07f)
-                c.drawArc(cx - radius, cy - radius, cx + radius, cy + radius, -90f,
-                    (streak * 31f).coerceAtMost(360f), false, p)
-            }
-            "Chain" -> {
-                p.color = accent
-                for (i in 0 until min(streak, 8)) {
-                    val x = w * .18f + i * w * .09f
-                    val y = cy + sin(i * .8).toFloat() * w * .04f
-                    c.drawCircle(x, y, w * .025f, p)
-                }
-            }
-            "Tree" -> {
-                p.color = accent
-                c.drawLine(cx, cy + w * .17f, cx, cy - w * .13f, p)
-                for (i in 0 until min(streak, 12)) {
-                    val y = cy + w * .10f - i * w * .019f
-                    val side = if (i % 2 == 0) 1 else -1
-                    c.drawLine(cx, y, cx + side * w * .13f, y - w * .10f, p)
-                    c.drawCircle(cx + side * w * .13f, y - w * .10f, w * .018f, p)
-                }
-            }
-            "Mountain" -> {
-                p.color = accent
-                p.strokeWidth = w * .009f
-                val path = Path().apply {
-                    moveTo(w * .12f, cy + w * .17f)
-                    lineTo(w * .42f, cy - w * .13f)
-                    lineTo(w * .54f, cy + w * .01f)
-                    lineTo(w * .72f, cy - w * .20f)
-                    lineTo(w * .90f, cy + w * .17f)
-                }
-                c.drawPath(path, p)
-                val progress = min(streak, 30) / 30f
-                c.drawCircle(w * (.12f + .78f * progress), cy + w * .17f - w * .30f * progress, w * .018f, p)
-            }
-            else -> {
-                p.style = Paint.Style.FILL
-                val random = java.util.Random(42)
-                repeat(65) { index ->
-                    val x = random.nextFloat() * w
-                    val y = h * .55f + random.nextFloat() * h * .18f
-                    p.color = if (index < streak) accent else 0xFF53617D.toInt()
-                    c.drawCircle(x, y, if (index < streak) w * .006f else w * .003f, p)
-                }
-            }
+            val x = startX + (i % 7) * (cell + gap)
+            val y = startY + (i / 7) * (cell + gap)
+            c.drawRoundRect(x, y, x + cell, y + cell, cell * .22f, cell * .22f, p)
         }
-        p.style = Paint.Style.FILL
     }
+
+    private fun blendColor(a: Int, b: Int, t: Float): Int = Color.rgb(
+        (Color.red(a) + (Color.red(b) - Color.red(a)) * t).toInt(),
+        (Color.green(a) + (Color.green(b) - Color.green(a)) * t).toInt(),
+        (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * t).toInt()
+    )
 }
