@@ -108,7 +108,7 @@ class MainActivity : Activity() {
         val picker = Spinner(this)
         picker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, styles)
         val prefs = getSharedPreferences("goalwall", MODE_PRIVATE)
-        picker.setSelection(styles.indexOf(prefs.getString("style", "Constellation")).coerceAtLeast(0))
+        picker.setSelection(styles.indexOf(prefs.getString("style", "Heatmap")).coerceAtLeast(0))
         picker.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -156,7 +156,7 @@ class MainActivity : Activity() {
 
     private fun applyWallpaper() {
         try {
-            val style = getSharedPreferences("goalwall", MODE_PRIVATE).getString("style", "Constellation") ?: "Constellation"
+            val style = getSharedPreferences("goalwall", MODE_PRIVATE).getString("style", "Heatmap") ?: "Heatmap"
             val goals = GoalStore.read(this)
             val bitmap = WallpaperRenderer.create(this, goals, GoalStore.overallStreak(goals), style)
             WallpaperManager.getInstance(this).setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK)
@@ -192,7 +192,7 @@ class DailyWallpaperWorker(context: Context, params: WorkerParameters) : Worker(
     override fun doWork(): Result = try {
         val goals = GoalStore.read(applicationContext)
         val style = applicationContext.getSharedPreferences("goalwall", Context.MODE_PRIVATE)
-            .getString("style", "Constellation") ?: "Constellation"
+            .getString("style", "Heatmap") ?: "Heatmap"
         val bitmap = WallpaperRenderer.create(applicationContext, goals, GoalStore.overallStreak(goals), style)
         WallpaperManager.getInstance(applicationContext).setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK)
         Result.success()
