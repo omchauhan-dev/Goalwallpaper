@@ -44,3 +44,6 @@ A GitHub Actions workflow is included to build a debug APK. After a successful w
 
 
 Build workflow: `.github/workflows/android.yml` runs on pushes to `main` and pull requests.
+
+
+Default wallpaper theme: Heatmap.
