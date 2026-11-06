@@ -30,8 +30,9 @@ object GoalStore {
             MutableList(array.length()) { i ->
                 val item = array.getJSONObject(i)
                 val dates = item.getJSONArray("dates")
-                Goal(item.getLong("id"), item.getString("title"),
-                    MutableSet(dates.length()) { j -> dates.getString(j) })
+                val completed = mutableSetOf<String>()
+                repeat(dates.length()) { j -> completed.add(dates.getString(j)) }
+                Goal(item.getLong("id"), item.getString("title"), completed)
             }
         } catch (_: Exception) { mutableListOf() }
     }
